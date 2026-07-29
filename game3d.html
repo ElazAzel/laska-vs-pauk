@@ -200,7 +200,11 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 // ─── Config ──────────────────────────────────────────
 const COLS=20,ROWS=20;
 const BASE_INTERVAL=180,MIN_INTERVAL=70;
-const COINS_PER_SPIDER=5;
+const COINS_PER_SPIDER=10;
+const STREAK_BONUS_EVERY=5;
+const STREAK_BONUS_COINS=5;
+const MILESTONE_EVERY=100;
+const MILESTONE_BONUS=20;
 
 // ─── Audio ───────────────────────────────────────────
 const audioCtx=new (window.AudioContext||window.webkitAudioContext)();
@@ -338,7 +342,7 @@ const SHOP={
 
 // ─── State ───────────────────────────────────────────
 const state={
-  score:0,coins:0,gameOver:false,paused:true,
+  score:0,coins:0,highScore:0,streak:0,gameOver:false,paused:true,
   moveTimer:0,moveInterval:BASE_INTERVAL,
   direction:{x:1,y:0},nextDirection:{x:1,y:0},
   skin:'default',hat:'none',trail:'none',scene:'forest',
@@ -347,10 +351,10 @@ const state={
   activeBonuses:{},
   snakeGrid:[],prevPos:[],targetPos:[],
 };
-function save(){try{localStorage.setItem('laska3d',JSON.stringify({coins:state.coins,scene:state.scene,skin:state.skin,hat:state.hat,trail:state.trail,owned:state.owned,bonuses:state.bonuses}))}catch(e){}}
+function save(){try{localStorage.setItem('laska3d',JSON.stringify({coins:state.coins,highScore:state.highScore,scene:state.scene,skin:state.skin,hat:state.hat,trail:state.trail,owned:state.owned,bonuses:state.bonuses}))}catch(e){}}
 function load(){
   try{const d=JSON.parse(localStorage.getItem('laska3d'));if(d){
-    state.coins=d.coins||0;state.scene=d.scene||'forest';state.skin=d.skin||'default';state.hat=d.hat||'none';state.trail=d.trail||'none';
+    state.coins=d.coins||0;state.highScore=d.highScore||0;state.scene=d.scene||'forest';state.skin=d.skin||'default';state.hat=d.hat||'none';state.trail=d.trail||'none';
     if(d.owned)Object.assign(state.owned,d.owned);if(d.bonuses)Object.assign(state.bonuses,d.bonuses);
   }}catch(e){}
 }
@@ -456,7 +460,7 @@ function getSkinColor(){const i=SHOP.skins.items.find(i=>i.id===state.skin);retu
 function furMat(color,opts={}){return new THREE.MeshStandardMaterial({color,roughness:opts.roughness??0.75,metalness:opts.metalness??0.03,map:furTex,bumpMap:furTex,bumpScale:0.012,envMapIntensity:0.15});}
 function furMatBright(color,opts={}){return new THREE.MeshStandardMaterial({color,roughness:opts.roughness??0.7,metalness:opts.metalness??0.02,map:furTex,bumpMap:furTex,bumpScale:0.01,envMapIntensity:0.2});}
 
-let jawMesh=null,earMeshes=[],pupilMeshes=[],tailTuft=null;
+let jawMesh=null,earMeshes=[],pupilMeshes=[],eyeWhiteMeshes=[],tailTuft=null;
 
 function bodyColor(skin,i){if(state.skin==='rainbow')return new THREE.Color().setHSL((i%12)/12,0.7,0.5+0.15*Math.sin(i*1.2)).getHex();return new THREE.Color(skin).lerp(new THREE.Color(LERP_DARK),Math.min(i/(BODY_COLORS.length-1||1),0.85)).getHex();}
 
@@ -470,11 +474,18 @@ function createWeaselHead(){
   const jaw=new THREE.Mesh(new THREE.SphereGeometry(0.28,20,20),lighter);jaw.scale.set(0.8,0.45,1.1);jaw.position.set(0,-0.24,0.35);jaw.castShadow=true;jaw.name='jaw';g.add(jaw);
   const snout=new THREE.Mesh(new THREE.SphereGeometry(0.18,20,20),lighter);snout.scale.set(0.7,0.65,1.2);snout.position.set(0,-0.06,0.65);g.add(snout);
   const nose=new THREE.Mesh(new THREE.SphereGeometry(0.065,12,12),new THREE.MeshStandardMaterial({color:0x333,roughness:0.4,metalness:0.3}));nose.position.set(0,-0.03,0.78);g.add(nose);
+  // Fangs
+  for(const s of[-1,1]){const fg=new THREE.Mesh(new THREE.ConeGeometry(0.025,0.06,6),new THREE.MeshStandardMaterial({color:0xffeeee,roughness:0.2}));fg.position.set(s*0.08,-0.22,0.50);fg.rotation.z=s*0.2;g.add(fg);}
+  // Whiskers
+  const wm=new THREE.LineBasicMaterial({color:0xddd,transparent:true,opacity:0.35});
+  for(const s of[-1,1]){const pts=[];for(let j=0;j<5;j++)pts.push(new THREE.Vector3(s*(0.22+j*0.05),-0.06+j*0.02,0.64+j*0.03));g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),wm));}
+  // Cheek fluff
+  for(const s of[-1,1]){for(let j=0;j<3;j++){const fl=new THREE.Mesh(new THREE.SphereGeometry(0.05,8,8),furMat(sk,{roughness:0.9}));fl.position.set(s*0.48,-0.02-j*0.06,0.20+j*0.06);fl.scale.set(0.6,0.5,0.4);g.add(fl);}}
   for(const s of[-1,1]){const t=new THREE.Mesh(new THREE.ConeGeometry(0.02,0.05,4),new THREE.MeshStandardMaterial({color:0xffffff,roughness:0.3}));t.position.set(s*0.05,-0.20,0.55);g.add(t);}
   const em=furMat(sk);const ei=new THREE.MeshStandardMaterial({color:0xf0b8a0,roughness:0.9});
   for(const s of[-1,1]){const ear=new THREE.Mesh(new THREE.SphereGeometry(0.22,18,18),em);ear.scale.set(0.7,0.38,0.8);ear.position.set(s*0.50,0.40,0.15);ear.rotation.z=s*0.3;ear.rotation.x=-0.2;ear.castShadow=true;ear.name='ear';g.add(ear);const inner=new THREE.Mesh(new THREE.SphereGeometry(0.1,12,12),ei);inner.scale.set(0.6,0.28,0.6);inner.position.set(s*0.50,0.36,0.20);g.add(inner);}
   for(const s of[-1,1]){
-    const w=new THREE.Mesh(new THREE.SphereGeometry(0.16,22,22),new THREE.MeshStandardMaterial({color:0xffffff,roughness:0,metalness:0}));w.position.set(s*0.24,0.10,0.48);g.add(w);
+    const w=new THREE.Mesh(new THREE.SphereGeometry(0.16,22,22),new THREE.MeshStandardMaterial({color:0xffffff,roughness:0,metalness:0}));w.position.set(s*0.24,0.10,0.48);w.name='eyeWhite';g.add(w);
     const p=new THREE.Mesh(new THREE.SphereGeometry(0.10,16,16),new THREE.MeshStandardMaterial({color:0x1a1a2e,roughness:0,metalness:0.1}));p.scale.set(0.7,1,0.3);p.position.set(s*0.24,0.10,0.54);p.name='pupil';g.add(p);
     const hl1=new THREE.Mesh(new THREE.SphereGeometry(0.04,8,8),new THREE.MeshStandardMaterial({color:0xffffff,roughness:0,metalness:0,emissive:0xffffff,emissiveIntensity:0.6}));hl1.position.set(s*0.28,0.15,0.56);g.add(hl1);
     const hl2=new THREE.Mesh(new THREE.SphereGeometry(0.02,6,6),new THREE.MeshStandardMaterial({color:0xffffff,roughness:0,metalness:0,emissive:0xffffff,emissiveIntensity:0.3}));hl2.position.set(s*0.21,0.06,0.57);g.add(hl2);
@@ -509,14 +520,18 @@ function createHat(type){
 let spiderLegMeshes=[];
 function createCuteSpider(s=1){
   const g=new THREE.Group();spiderLegMeshes=[];
-  const bm=new THREE.MeshStandardMaterial({color:0xdd6688,roughness:0.35,metalness:0.15,emissive:0xdd4488,emissiveIntensity:0.04});
-  const bm2=new THREE.MeshStandardMaterial({color:0xee7799,roughness:0.4,metalness:0.1});const lm=new THREE.MeshStandardMaterial({color:0xcc5577,roughness:0.45,metalness:0.08});
+  const bm=new THREE.MeshStandardMaterial({color:0xdd6688,roughness:0.35,metalness:0.15,emissive:0xdd4488,emissiveIntensity:0.04,map:furTex,bumpMap:furTex,bumpScale:0.015});
+  const bm2=new THREE.MeshStandardMaterial({color:0xee7799,roughness:0.4,metalness:0.1,map:furTex,bumpMap:furTex,bumpScale:0.012});const lm=new THREE.MeshStandardMaterial({color:0xcc5577,roughness:0.45,metalness:0.08});
   const fr=new THREE.Mesh(new THREE.SphereGeometry(0.25,26,26),bm);fr.scale.set(1.1,0.9,1);fr.position.set(0,0.12,0.15);fr.castShadow=true;g.add(fr);
   const ba=new THREE.Mesh(new THREE.SphereGeometry(0.35,26,26),bm2);ba.scale.set(1.2,1.0,0.95);ba.position.set(0,0.12,-0.25);ba.castShadow=true;g.add(ba);
   const conn=new THREE.Mesh(new THREE.CylinderGeometry(0.2,0.25,0.1,12),bm);conn.rotateX(Math.PI/2);conn.position.set(0,0.12,-0.04);g.add(conn);
   const bt=new THREE.Mesh(new THREE.SphereGeometry(0.1,12,12),new THREE.MeshStandardMaterial({color:0xff3366,roughness:0.2,metalness:0.1,emissive:0xff3366,emissiveIntensity:0.2}));bt.position.set(0,0.22,-0.25);bt.scale.set(0.5,0.6,0.4);g.add(bt);
+  // Fangs
+  for(const sd of[-1,1]){const fg=new THREE.Mesh(new THREE.ConeGeometry(0.03,0.08,6),new THREE.MeshStandardMaterial({color:0xcc7788,roughness:0.4}));fg.position.set(sd*0.07,0.08,0.38);fg.rotation.x=0.4;fg.rotation.z=sd*0.2;fg.name='fang';g.add(fg);}
+  // Pedipalps
+  for(const sd of[-1,1]){const pp1=new THREE.Mesh(new THREE.CylinderGeometry(0.025,0.035,0.1,6),lm);pp1.position.set(sd*0.12,0.06,0.28);pp1.rotation.z=sd*0.3;pp1.rotation.x=-0.3;pp1.name='palp1';g.add(pp1);const pp2=new THREE.Mesh(new THREE.CylinderGeometry(0.02,0.025,0.08,6),lm);pp2.position.set(sd*0.16,0.02,0.32);pp2.rotation.z=sd*0.5;pp2.rotation.x=-0.5;pp2.name='palp2';g.add(pp2);const pTip=new THREE.Mesh(new THREE.SphereGeometry(0.025,6,6),new THREE.MeshStandardMaterial({color:0xcc5577,roughness:0.4}));pTip.position.set(sd*0.20,-0.02,0.34);g.add(pTip);}
   for(let l=0;l<8;l++){const sd=l<4?-1:1,idx=l%4,xo=0.08+idx*0.07,zo=-0.10+idx*0.12;const f=new THREE.Mesh(new THREE.CylinderGeometry(0.03,0.045,0.14,6),lm);f.rotation.z=(-0.4-idx*0.1)*sd;f.rotation.x=-0.1+idx*0.1;f.position.set(sd*xo,0.06,zo);f.name=`femur_${l}`;g.add(f);spiderLegMeshes.push(f);const t=new THREE.Mesh(new THREE.CylinderGeometry(0.025,0.035,0.12,6),lm);t.rotation.z=(-0.6-idx*0.15)*sd;t.rotation.x=0.1+idx*0.08;t.position.set(sd*(xo+0.12),-0.02,zo+0.02);t.name=`tibia_${l}`;g.add(t);spiderLegMeshes.push(t);const ft=new THREE.Mesh(new THREE.SphereGeometry(0.025,6,6),new THREE.MeshStandardMaterial({color:0xbb5577,roughness:0.5}));ft.position.set(sd*(xo+0.20),-0.08,zo+0.03);g.add(ft);}
-  for(const sd of[-1,1]){const e=new THREE.Mesh(new THREE.SphereGeometry(0.1,16,16),new THREE.MeshStandardMaterial({color:0xffffff,roughness:0,metalness:0}));e.position.set(sd*0.12,0.22,0.36);e.scale.set(1,1.1,0.6);g.add(e);const p=new THREE.Mesh(new THREE.SphereGeometry(0.06,12,12),new THREE.MeshStandardMaterial({color:0x1a1a2e,roughness:0,metalness:0.1}));p.position.set(sd*0.12,0.22,0.40);p.scale.set(0.7,1,0.4);g.add(p);const hl=new THREE.Mesh(new THREE.SphereGeometry(0.025,6,6),new THREE.MeshStandardMaterial({color:0xffffff,roughness:0,metalness:0}));hl.position.set(sd*0.15,0.25,0.42);g.add(hl);const bl=new THREE.Mesh(new THREE.SphereGeometry(0.12,8,8),new THREE.MeshBasicMaterial({color:0xff6688,transparent:true,opacity:0.12}));bl.position.set(sd*0.12,0.22,0.36);g.add(bl);}
+  for(const sd of[-1,1]){const e=new THREE.Mesh(new THREE.SphereGeometry(0.1,16,16),new THREE.MeshStandardMaterial({color:0xffffff,roughness:0,metalness:0}));e.position.set(sd*0.12,0.22,0.36);e.scale.set(1,1.1,0.6);g.add(e);const iris=new THREE.Mesh(new THREE.SphereGeometry(0.055,12,12),new THREE.MeshStandardMaterial({color:0xcc4488,roughness:0.1,metalness:0.3}));iris.position.set(sd*0.12,0.22,0.40);iris.scale.set(0.6,0.8,0.3);g.add(iris);const p=new THREE.Mesh(new THREE.SphereGeometry(0.05,12,12),new THREE.MeshStandardMaterial({color:0x1a1a2e,roughness:0,metalness:0.1}));p.position.set(sd*0.12,0.22,0.41);p.scale.set(0.6,0.8,0.3);g.add(p);const hl=new THREE.Mesh(new THREE.SphereGeometry(0.025,6,6),new THREE.MeshStandardMaterial({color:0xffffff,roughness:0,metalness:0}));hl.position.set(sd*0.15,0.25,0.42);g.add(hl);const bl=new THREE.Mesh(new THREE.SphereGeometry(0.12,8,8),new THREE.MeshBasicMaterial({color:0xff6688,transparent:true,opacity:0.12}));bl.position.set(sd*0.12,0.22,0.36);g.add(bl);}
   const bc2=new THREE.MeshStandardMaterial({color:0xff66aa,roughness:0.3,metalness:0.1});for(const sd of[-1,1]){const l=new THREE.Mesh(new THREE.TorusGeometry(0.05,0.02,6,10),bc2);l.scale.set(1.2,1,0.5);l.position.set(sd*0.08,0.30,-0.15);l.rotation.z=sd*0.2;g.add(l);}const bc=new THREE.Mesh(new THREE.SphereGeometry(0.025,6,6),bc2);bc.position.set(0,0.30,-0.15);g.add(bc);
   g.scale.set(s,s,s);return g;
 }
@@ -530,7 +545,7 @@ function createWeasel(){
   for(const s of snakeSegments){scene.remove(s);if(s.geometry)s.geometry.dispose();if(s.material)s.material.dispose();}
   for(const c of bodyConnectors){scene.remove(c);c.geometry.dispose();c.material.dispose();}
   if(hatMesh){scene.remove(hatMesh);hatMesh=null;}
-  bodyConnectors.length=0;snakeSegments.length=0;jawMesh=null;earMeshes=[];pupilMeshes=[];tailTuft=null;
+  bodyConnectors.length=0;snakeSegments.length=0;jawMesh=null;earMeshes=[];pupilMeshes=[];eyeWhiteMeshes=[];tailTuft=null;
   state.snakeGrid=[];for(let i=0;i<3;i++)state.snakeGrid.push({x:3-i,y:10});
   state.prevPos=[];state.targetPos=[];for(const s of state.snakeGrid){const p=g2v(s.x,s.y);state.prevPos.push(p.clone());state.targetPos.push(p.clone());}
   const sk=getSkinColor();
@@ -538,7 +553,7 @@ function createWeasel(){
     const ih=i===0,it=i===state.snakeGrid.length-1;
     const col=bodyColor(sk,i);const pos=state.targetPos[i].clone();
     let m;
-    if(ih){m=createWeaselHead();m.position.copy(pos);m.position.y=0.08;m.traverse(c=>{if(c.name==='jaw')jawMesh=c;if(c.name==='ear')earMeshes.push(c);if(c.name==='pupil')pupilMeshes.push(c);});
+    if(ih){m=createWeaselHead();m.position.copy(pos);m.position.y=0.08;m.traverse(c=>{if(c.name==='jaw')jawMesh=c;if(c.name==='ear')earMeshes.push(c);if(c.name==='pupil')pupilMeshes.push(c);if(c.name==='eyeWhite')eyeWhiteMeshes.push(c);});
       hatMesh=createHat(state.hat);hatMesh.position.copy(pos);hatMesh.position.y=0.08;hatMesh.traverse(c=>{if(c.isMesh)c.castShadow=true;});scene.add(hatMesh);
     }else if(it){m=createTail(col);m.position.copy(pos);m.position.y=0.05;m.traverse(c=>{if(c.name==='tuft')tailTuft=c;});}
     else{m=createBodySegment(col);m.position.copy(pos);m.position.y=0.05;m.add(createLegs(col,1));m.add(createLegs(col,-1));}
@@ -582,10 +597,15 @@ function moveSnake(){
   state.snakeGrid.unshift(nh);let ate=false;
   if(nh.x===spiderPos.x&&nh.y===spiderPos.y){
     ate=true;const pts=state.activeBonuses['2x']?20:10;
-    state.score+=pts;state.coins+=COINS_PER_SPIDER;
+    state.score+=pts;state.streak++;
+    let coinsEarned=COINS_PER_SPIDER;
+    let bonusNote='';
+    if(state.streak%STREAK_BONUS_EVERY===0){coinsEarned+=STREAK_BONUS_COINS;bonusNote=` 🔥+${STREAK_BONUS_COINS}`;}
+    if(state.score%MILESTONE_EVERY===0){coinsEarned+=MILESTONE_BONUS;bonusNote+=` 🏆+${MILESTONE_BONUS}`;}
+    state.coins+=coinsEarned;
     scoreEl.textContent=state.score;coinsEl.textContent=state.coins;
-    playSfx('eat');comboEl.innerHTML=`+${pts}<small>🪙 +${COINS_PER_SPIDER}</small>`;comboEl.classList.add('pop');
-    clearTimeout(comboTimeout);comboTimeout=setTimeout(()=>comboEl.classList.remove('pop'),500);
+    playSfx('eat');comboEl.innerHTML=`+${pts}<small>🪙 +${coinsEarned}${bonusNote}</small>`;comboEl.classList.add('pop');
+    clearTimeout(comboTimeout);comboTimeout=setTimeout(()=>comboEl.classList.remove('pop'),700);
     spawnParticles(g2v(spiderPos.x,spiderPos.y),30);
     if(state.score%50===0&&state.moveInterval>MIN_INTERVAL){state.moveInterval=Math.max(MIN_INTERVAL,state.moveInterval-12);showStatus('⏩ Speed Up!');}
     createSpider();save();
@@ -607,12 +627,17 @@ function moveSnake(){
   while(snakeSegments.length>state.snakeGrid.length){const m=snakeSegments.pop();scene.remove(m);}
   rebuildConnectors();state.moveTimer=0;
 }
-function endGame(){state.gameOver=true;playSfx('die');overlay.classList.add('show');overlayTitle.textContent='💀 Game Over';overlaySub.textContent='Ласка разбилась';overlayScore.innerHTML=`<span style="display:flex;justify-content:center;gap:20px">🏆 ${state.score} 🪙 ${state.coins}</span>`;}
+function endGame(){
+  state.gameOver=true;playSfx('die');let extra='';
+  if(state.score>state.highScore){state.highScore=state.score;const bonus=Math.floor(state.score/2);state.coins+=bonus;extra=` 🏆+${bonus}`;showStatus(`🎉 Новый рекорд! +${bonus}🪙`);}
+  overlay.classList.add('show');overlayTitle.textContent='💀 Game Over';overlaySub.textContent='Ласка разбилась';
+  overlayScore.innerHTML=`<span style="display:flex;justify-content:center;gap:16px">🏆 ${state.score} 🪙 ${state.coins}<br><small style="color:var(--gold);font-size:14px">Рекорд: ${state.highScore}</small></span>`;save();
+}
 function restart(){
-  state.gameOver=false;state.score=0;state.moveInterval=BASE_INTERVAL;
+  state.gameOver=false;state.score=0;state.streak=0;state.moveInterval=BASE_INTERVAL;
   state.direction={x:1,y:0};state.nextDirection={x:1,y:0};scoreEl.textContent='0';state.moveTimer=0;
   state.activeBonuses={};state._magnetCooldown=0;overlay.classList.remove('show');
-  jawMesh=null;earMeshes=[];pupilMeshes=[];tailTuft=null;
+  jawMesh=null;earMeshes=[];pupilMeshes=[];eyeWhiteMeshes=[];tailTuft=null;
   for(const p of particles){scene.remove(p.mesh);p.mesh.geometry.dispose();p.mesh.material.dispose();}
   for(const p of trailParticles){scene.remove(p.mesh);p.mesh.geometry.dispose();p.mesh.material.dispose();}
   particles.length=0;trailParticles.length=0;
@@ -679,14 +704,14 @@ function renderShop(){
   }
 }
 function applyCosmetics(){
-  jawMesh=null;earMeshes=[];pupilMeshes=[];tailTuft=null;
+  jawMesh=null;earMeshes=[];pupilMeshes=[];eyeWhiteMeshes=[];tailTuft=null;
   for(const s of snakeSegments)scene.remove(s);if(hatMesh){scene.remove(hatMesh);hatMesh=null;}
   for(const c of bodyConnectors){scene.remove(c);c.geometry.dispose();c.material.dispose();}
   bodyConnectors.length=0;snakeSegments.length=0;const sk=getSkinColor();
   for(let i=0;i<state.snakeGrid.length;i++){
     const ih=i===0,it=i===state.snakeGrid.length-1;const col=bodyColor(sk,i);const pos=state.targetPos[i].clone();
     let m;
-    if(ih){m=createWeaselHead();m.position.copy(pos);m.position.y=0.08;m.traverse(c=>{if(c.name==='jaw')jawMesh=c;if(c.name==='ear')earMeshes.push(c);if(c.name==='pupil')pupilMeshes.push(c);});
+    if(ih){m=createWeaselHead();m.position.copy(pos);m.position.y=0.08;m.traverse(c=>{if(c.name==='jaw')jawMesh=c;if(c.name==='ear')earMeshes.push(c);if(c.name==='pupil')pupilMeshes.push(c);if(c.name==='eyeWhite')eyeWhiteMeshes.push(c);});
       hatMesh=createHat(state.hat);hatMesh.position.copy(pos);hatMesh.position.y=0.08;hatMesh.traverse(c=>{if(c.isMesh)c.castShadow=true;});scene.add(hatMesh);
     }else if(it){m=createTail(col);m.position.copy(pos);m.position.y=0.05;m.traverse(c=>{if(c.name==='tuft')tailTuft=c;});}
     else{m=createBodySegment(col);m.position.copy(pos);m.position.y=0.05;m.add(createLegs(col,1));m.add(createLegs(col,-1));}
@@ -751,10 +776,14 @@ function animate(time){
   if(jawMesh)jawMesh.position.y=-0.24+Math.sin(time*0.003)*0.015;
   for(let i=0;i<earMeshes.length;i++){const s=i===0?1:-1;earMeshes[i].rotation.z=s*0.3+Math.sin(time*0.005+i)*0.03;earMeshes[i].rotation.x=-0.2+Math.sin(time*0.004+i*1.5)*0.02;}
   if(pupilMeshes.length>=2){const lx=Math.sin(time*0.002)*0.02,ly=Math.sin(time*0.0015)*0.01;pupilMeshes[0].position.x=-0.24+lx;pupilMeshes[1].position.x=0.24+lx;pupilMeshes[0].position.y=0.10+ly;pupilMeshes[1].position.y=0.10+ly;}
+  // Blink (squash eyes)
+  if(!state._blinkTimer)state._blinkTimer=2000+Math.random()*3000;
+  state._blinkTimer-=dt;
+  if(state._blinkTimer<0){const bt=Math.sin(Math.max(0,Math.min(1,1+state._blinkTimer/100))*Math.PI);for(const el of eyeWhiteMeshes)el.scale.y=1.1-bt*0.9;for(const p of pupilMeshes)p.scale.y=1-bt*0.9;if(state._blinkTimer<-100){state._blinkTimer=2000+Math.random()*3000;for(const el of eyeWhiteMeshes)el.scale.y=1.1;for(const p of pupilMeshes)p.scale.y=1;}}
   if(tailTuft){tailTuft.material.emissiveIntensity=0.2+Math.sin(time*0.005)*0.25;}
   const tail=snakeSegments[snakeSegments.length-1];if(tail&&tail.name==='tail')tail.rotation.y=Math.sin(time*0.003)*0.15;
   for(let i=1;i<snakeSegments.length-1;i++){const seg=snakeSegments[i];if(seg.type==='Mesh'){seg.children.forEach(c=>{if(c.name==='legUpper'||c.name==='legLower')c.rotation.z+=Math.sin(time*0.006+i*0.5)*0.015;if(c.name==='foot')c.position.y=-0.16+Math.sin(time*0.006+i*0.5)*0.025;});}}
-  if(spiderMesh){spiderMesh.position.copy(g2v(spiderPos.x,spiderPos.y));spiderMesh.position.y=0.15+Math.sin(time*0.004)*0.05;spiderMesh.rotation.y+=0.01;for(const lm of spiderLegMeshes){const li=parseInt(lm.name.split('_')[1])||0,ph=li*0.8+time*0.004,wc=Math.sin(ph)*0.12;if(lm.name.startsWith('femur_'))lm.rotation.x+=wc*0.02;else if(lm.name.startsWith('tibia_'))lm.rotation.x+=wc*0.03;}spiderMesh.traverse(c=>{if(c.name==='eyeGlow')c.material.opacity=0.12+Math.sin(time*0.005)*0.1;});}
+  if(spiderMesh){spiderMesh.position.copy(g2v(spiderPos.x,spiderPos.y));spiderMesh.position.y=0.15+Math.sin(time*0.004)*0.05;spiderMesh.rotation.y+=0.01;for(const lm of spiderLegMeshes){const li=parseInt(lm.name.split('_')[1])||0,ph=li*0.8+time*0.004,wc=Math.sin(ph)*0.12;if(lm.name.startsWith('femur_'))lm.rotation.x+=wc*0.02;else if(lm.name.startsWith('tibia_'))lm.rotation.x+=wc*0.03;}}
   if(!state.paused&&!state.gameOver&&snakeSegments.length>0&&state.trail!=='none'&&time%3<1.5)spawnTrail(snakeSegments[0].position);
   dustP.rotation.y+=0.0003;updateParticles(dt);
   if(!state.gameOver&&snakeSegments.length>0){const h=snakeSegments[0].position;const tc=new THREE.Vector3(h.x+8,13+Math.sin(time*0.002)*0.5,h.z+14);camera.position.lerp(tc,0.015);camera.lookAt(new THREE.Vector3(h.x,0.3,h.z));}
@@ -768,7 +797,7 @@ animFrame=requestAnimationFrame(animate);
 
 overlay.classList.add('show');
 overlayTitle.textContent='🦊 Ласка vs 🕷️';
-overlaySub.textContent='Гоняй пауков, зарабатывай 🪙 и покупай крутые штуки!';
+overlaySub.textContent=state.highScore>0?`🏆 Рекорд: ${state.highScore} · Гоняй пауков 🪙`:'Гоняй пауков, зарабатывай 🪙 и покупай крутые штуки!';
 const sb=document.createElement('button');sb.className='btn-start';sb.textContent='🎮 Играть!';
 sb.addEventListener('click',e=>{e.stopPropagation();if(state.gameOver)restart();else{state.paused=false;overlay.classList.remove('show');if(audioCtx.state==='suspended')audioCtx.resume();}});
 document.querySelector('#overlay .card').appendChild(sb);
