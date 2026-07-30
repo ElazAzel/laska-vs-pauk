@@ -48,6 +48,8 @@ canvas{display:block}
   display:flex;align-items:center;gap:5px;color:var(--fg);letter-spacing:0.01em}
 .hud-badge .coin{color:var(--gold)}
 .hud-badge .score{color:var(--accent)}
+@keyframes coinPop{0%{transform:scale(1)}40%{transform:scale(1.35)}100%{transform:scale(1)}}
+.coin-pop{animation:coinPop 0.35s var(--ease)}
 
 #bonusBar{position:fixed;top:58px;left:50%;transform:translateX(-50%);z-index:10;pointer-events:none;display:flex;gap:4px}
 .bonus-chip{background:var(--surface);backdrop-filter:blur(12px);border:1px solid var(--border);
@@ -129,6 +131,7 @@ canvas{display:block}
   #shop .items{grid-template-columns:repeat(auto-fill,minmax(115px,1fr));padding:8px 8px 10px}
   #shop .item{padding:9px 7px}
 }
+#vignette{position:fixed;inset:0;pointer-events:none;z-index:4;background:radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.5) 100%)}
 </style>
 </head>
 <body>
@@ -147,6 +150,7 @@ canvas{display:block}
 <div id="bonusBar"></div>
 <div id="status"></div>
 <div id="combo">+10</div>
+<div id="vignette"></div>
 
 <div id="overlay">
   <div class="bg"></div>
@@ -228,6 +232,7 @@ function playSfx(name){
 // ─── DOM ─────────────────────────────────────────────
 const $=id=>document.getElementById(id);
 const scoreEl=$('scoreDisplay'),coinsEl=$('coinsDisplay'),shopCoinsEl=$('shopCoins');
+function popCoin(){coinsEl.classList.remove('coin-pop');void coinsEl.offsetWidth;coinsEl.classList.add('coin-pop');}
 const overlay=$('overlay'),overlayTitle=$('overlayTitle'),overlaySub=$('overlaySub'),overlayScore=$('overlayScore');
 const statusEl=$('status'),comboEl=$('combo'),shopEl=$('shop'),shopItemsEl=$('shopItems'),shopCatsEl=$('shopCats');
 const shopBtn=$('shopBtn'),shopClose=$('shopClose'),bonusBar=$('bonusBar');
@@ -387,7 +392,8 @@ const topLight=new THREE.DirectionalLight(0x6688ff,0.2);
 topLight.position.set(0,20,0);scene.add(topLight);
 
 // ─── Environment ─────────────────────────────────────
-let envObjects=[];let groundTexCache={};
+let envObjects=[];let groundTexCache={};let screenShake=0;
+function shake(n){screenShake=Math.max(screenShake||0,n);}
 function initEnvironment(sid){
   for(const o of envObjects){scene.remove(o);if(o.geometry)o.geometry.dispose();if(o.material)o.material.dispose();}
   envObjects=[];const cfg=SCENES[sid]||SCENES.forest;
@@ -440,6 +446,9 @@ function initEnvironment(sid){
   for(const[wx,wz]of[[-0.15,-0.15],[-0.15,ROWS+0.15],[COLS+0.15,-0.15],[COLS+0.15,ROWS+0.15]]){
     const g=new THREE.Group();
     for(let i=0;i<5;i++){const a=(i/5)*Math.PI*2;const pts=[new THREE.Vector3(0,0,0)];for(let r=0.3;r<=1.2;r+=0.3)pts.push(new THREE.Vector3(Math.cos(a)*r,Math.sin(a)*r*0.4,(Math.random()-0.5)*0.03));g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),wbm));}
+    // Dew drops
+    const dm=new THREE.MeshStandardMaterial({color:0xccddff,roughness:0,metalness:0.1,transparent:true,opacity:0.15});
+    for(let d=0;d<6;d++){const dw=new THREE.Mesh(new THREE.SphereGeometry(0.015+Math.random()*0.015,6,6),dm);const ang=Math.random()*Math.PI*2,r=0.3+Math.random()*0.8;dw.position.set(Math.cos(ang)*r,Math.sin(ang)*r*0.4,0);dw.position.y+=Math.sin(ang)*0.05;g.add(dw);}
     g.position.set(wx,0.35,wz);g.scale.set(0.5+Math.random()*0.2,0.5+Math.random()*0.2,1);g.rotation.y=Math.random()*Math.PI*2;scene.add(g);envObjects.push(g);
   }
   // Grass
@@ -573,9 +582,16 @@ function rebuildConnectors(){
 }
 function createSpider(){if(spiderMesh){scene.remove(spiderMesh);}spiderLegMeshes=[];spiderMesh=createCuteSpider(0.65);spiderPos=randGridPos();spiderMesh.position.copy(g2v(spiderPos.x,spiderPos.y));spiderMesh.position.y=0.15;scene.add(spiderMesh);}
 function randGridPos(){let p,a=0;do{p={x:Math.floor(Math.random()*COLS),y:Math.floor(Math.random()*ROWS)};a++;}while(a<100&&state.snakeGrid.some(s=>s.x===p.x&&s.y===p.y));return p;}
-function spawnParticles(pos,c=25){
-  const cs=[0xe94560,0xff6b35,0xffd700,0x44ff88,0x66ccff];
-  for(let i=0;i<c;i++){const sz=0.03+Math.random()*0.08;const m=new THREE.Mesh(new THREE.SphereGeometry(sz,8,8),new THREE.MeshStandardMaterial({color:cs[Math.floor(Math.random()*cs.length)],emissive:cs[Math.floor(Math.random()*cs.length)],emissiveIntensity:1,transparent:true,opacity:1}));m.position.copy(pos);m.position.y+=0.3;particles.push({mesh:m,vel:new THREE.Vector3((Math.random()-0.5)*0.2,Math.random()*0.12+0.04,(Math.random()-0.5)*0.2),life:1});scene.add(m);}
+function spawnParticles(pos,c=25,star=false){
+  const cs=[0xe94560,0xff6b35,0xffd700,0x44ff88,0x66ccff,0xff44aa];
+  for(let i=0;i<c;i++){
+    const col=cs[Math.floor(Math.random()*cs.length)];
+    const sz=0.02+Math.random()*0.07;
+    const m=star&&Math.random()>0.6?new THREE.Mesh(new THREE.OctahedronGeometry(sz*1.5,0),new THREE.MeshStandardMaterial({color:col,emissive:col,emissiveIntensity:1.5,transparent:true,opacity:1,roughness:0,metalness:0.3})):new THREE.Mesh(new THREE.SphereGeometry(sz,8,8),new THREE.MeshStandardMaterial({color:col,emissive:col,emissiveIntensity:1,transparent:true,opacity:1}));
+    m.position.copy(pos);m.position.y+=0.3;
+    const angle=Math.random()*Math.PI*2,spd=0.05+Math.random()*0.15;
+    particles.push({mesh:m,vel:new THREE.Vector3(Math.cos(angle)*spd,Math.random()*0.1+0.02,Math.sin(angle)*spd),life:0.8+Math.random()*0.4,spin:(Math.random()-0.5)*0.1});scene.add(m);
+  }
 }
 function spawnTrail(pos){
   if(state.trail==='none')return;
@@ -583,7 +599,7 @@ function spawnTrail(pos){
   const g=cf[state.trail];if(!g)return;const m=new THREE.Mesh(new THREE.SphereGeometry(g.s,6,6),new THREE.MeshStandardMaterial({color:g.c,emissive:g.e||g.c,emissiveIntensity:1,transparent:true,opacity:0.6+Math.random()*0.3}));m.position.copy(pos);m.position.y+=Math.random()*0.05;scene.add(m);trailParticles.push({mesh:m,life:1});
 }
 function updateParticles(dt){
-  for(let i=particles.length-1;i>=0;i--){const p=particles[i];p.mesh.position.add(p.vel.clone().multiplyScalar(dt*0.06));p.vel.y-=0.0003*dt;p.vel.x*=0.99;p.vel.z*=0.99;p.life-=dt*0.018;p.mesh.material.opacity=Math.max(0,p.life);p.mesh.scale.setScalar(0.2+p.life*0.8);if(p.life<=0){scene.remove(p.mesh);p.mesh.geometry.dispose();p.mesh.material.dispose();particles.splice(i,1);}}
+  for(let i=particles.length-1;i>=0;i--){const p=particles[i];p.mesh.position.add(p.vel.clone().multiplyScalar(dt*0.06));p.vel.y-=0.0003*dt;p.vel.x*=0.99;p.vel.z*=0.99;p.life-=dt*0.018;p.mesh.material.opacity=Math.max(0,p.life);p.mesh.scale.setScalar(0.2+p.life*0.8);if(p.spin)p.mesh.rotation.x+=p.spin;p.mesh.rotation.z+=0.02;if(p.life<=0){scene.remove(p.mesh);p.mesh.geometry.dispose();p.mesh.material.dispose();particles.splice(i,1);}}
   for(let i=trailParticles.length-1;i>=0;i--){const p=trailParticles[i];p.life-=dt*0.025;p.mesh.material.opacity=Math.max(0,p.life);p.mesh.scale.setScalar(0.3+p.life*0.7);p.mesh.position.y+=dt*0.001;if(p.life<=0){scene.remove(p.mesh);p.mesh.geometry.dispose();p.mesh.material.dispose();trailParticles.splice(i,1);}}
 }
 
@@ -591,7 +607,7 @@ function updateParticles(dt){
 function moveSnake(){
   const head=state.snakeGrid[0],nh={x:head.x+state.direction.x,y:head.y+state.direction.y};
   if(nh.x<0||nh.x>=COLS||nh.y<0||nh.y>=ROWS||state.snakeGrid.some(s=>s.x===nh.x&&s.y===nh.y)){
-    if(state.activeBonuses.shield){state.activeBonuses.shield=false;state.bonuses.shield--;showStatus('🛡️ Щит сработал!');spawnParticles(g2v(Math.max(0,Math.min(nh.x,COLS-1)),Math.max(0,Math.min(nh.y,ROWS-1))),20);playSfx('shield');return;}
+    if(state.activeBonuses.shield){state.activeBonuses.shield=false;state.bonuses.shield--;showStatus('🛡️ Щит сработал!');spawnParticles(g2v(Math.max(0,Math.min(nh.x,COLS-1)),Math.max(0,Math.min(nh.y,ROWS-1))),30);playSfx('shield');shake(6);return;}
     endGame();return;
   }
   state.snakeGrid.unshift(nh);let ate=false;
@@ -603,10 +619,10 @@ function moveSnake(){
     if(state.streak%STREAK_BONUS_EVERY===0){coinsEarned+=STREAK_BONUS_COINS;bonusNote=` 🔥+${STREAK_BONUS_COINS}`;}
     if(state.score%MILESTONE_EVERY===0){coinsEarned+=MILESTONE_BONUS;bonusNote+=` 🏆+${MILESTONE_BONUS}`;}
     state.coins+=coinsEarned;
-    scoreEl.textContent=state.score;coinsEl.textContent=state.coins;
+    scoreEl.textContent=state.score;coinsEl.textContent=state.coins;popCoin();
     playSfx('eat');comboEl.innerHTML=`+${pts}<small>🪙 +${coinsEarned}${bonusNote}</small>`;comboEl.classList.add('pop');
     clearTimeout(comboTimeout);comboTimeout=setTimeout(()=>comboEl.classList.remove('pop'),700);
-    spawnParticles(g2v(spiderPos.x,spiderPos.y),30);
+    spawnParticles(g2v(spiderPos.x,spiderPos.y),35,true);shake(4);
     if(state.score%50===0&&state.moveInterval>MIN_INTERVAL){state.moveInterval=Math.max(MIN_INTERVAL,state.moveInterval-12);showStatus('⏩ Speed Up!');}
     createSpider();save();
   }
@@ -628,7 +644,7 @@ function moveSnake(){
   rebuildConnectors();state.moveTimer=0;
 }
 function endGame(){
-  state.gameOver=true;playSfx('die');let extra='';
+  state.gameOver=true;playSfx('die');shake(10);if(spiderMesh)spawnParticles(spiderMesh.position,40,true);let extra='';
   if(state.score>state.highScore){state.highScore=state.score;const bonus=Math.floor(state.score/2);state.coins+=bonus;extra=` 🏆+${bonus}`;showStatus(`🎉 Новый рекорд! +${bonus}🪙`);}
   overlay.classList.add('show');overlayTitle.textContent='💀 Game Over';overlaySub.textContent='Ласка разбилась';
   overlayScore.innerHTML=`<span style="display:flex;justify-content:center;gap:16px">🏆 ${state.score} 🪙 ${state.coins}<br><small style="color:var(--gold);font-size:14px">Рекорд: ${state.highScore}</small></span>`;save();
@@ -681,7 +697,7 @@ function renderShop(){
       div.classList.toggle('owned',owned);
       div.innerHTML=`<div class="icon">${item.icon||'📦'}</div><div class="name">${item.name}</div><div class="desc">${item.desc||''}</div><div class="price">${owned?'✅':ok?'<span class="coin">🪙 '+item.price+'</span>':'<span class="locked">🔒</span>'}</div><div class="tag ${owned?'owned':ok?'buy':'locked'}">${owned?'В инвентаре':ok?'Купить':'Нет монет'}</div>`;
       if(ok||owned)div.addEventListener('click',()=>{
-        if(!owned&&state.coins>=item.price){state.coins-=item.price;state.bonuses[item.id]=(state.bonuses[item.id]||0)+1;coinsEl.textContent=state.coins;playSfx('buy');save();}
+        if(!owned&&state.coins>=item.price){state.coins-=item.price;state.bonuses[item.id]=(state.bonuses[item.id]||0)+1;coinsEl.textContent=state.coins;popCoin();playSfx('buy');save();}
         activateBonus(item.id);renderShop();shopCoinsEl.textContent=state.coins;
       });
     }else{
@@ -691,7 +707,7 @@ function renderShop(){
       div.classList.toggle('owned',owned);div.classList.toggle('equipped',eq);
       div.innerHTML=`<div class="icon">${item.icon||'📦'}</div><div class="name">${item.name}</div><div class="desc">${item.desc||''}</div><div class="price">${free?'<span class="free">Бесплатно</span>':owned?'🔄':ok?'<span class="coin">🪙 '+item.price+'</span>':'<span class="locked">🔒</span>'}</div><div class="tag ${eq?'equipped':owned?'owned':ok?'buy':'locked'}">${eq?'Надето':owned?'Выбрать':free?'Получить':'Нет монет'}</div>`;
       if(owned||free||ok)div.addEventListener('click',()=>{
-        if(!owned&&state.coins>=item.price){state.coins-=item.price;coinsEl.textContent=state.coins;if(!state.owned[shopCategory])state.owned[shopCategory]=[];state.owned[shopCategory].push(item.id);playSfx('buy');save();}
+        if(!owned&&state.coins>=item.price){state.coins-=item.price;coinsEl.textContent=state.coins;popCoin();if(!state.owned[shopCategory])state.owned[shopCategory]=[];state.owned[shopCategory].push(item.id);playSfx('buy');save();}
         if(owned||free||state.owned[shopCategory]?.includes(item.id)){
           if(shopCategory==='skins')state.skin=item.id;else if(shopCategory==='hats')state.hat=item.id;else if(shopCategory==='trails')state.trail=item.id;else if(shopCategory==='scenes')state.scene=item.id;
           save();
@@ -783,10 +799,12 @@ function animate(time){
   if(tailTuft){tailTuft.material.emissiveIntensity=0.2+Math.sin(time*0.005)*0.25;}
   const tail=snakeSegments[snakeSegments.length-1];if(tail&&tail.name==='tail')tail.rotation.y=Math.sin(time*0.003)*0.15;
   for(let i=1;i<snakeSegments.length-1;i++){const seg=snakeSegments[i];if(seg.type==='Mesh'){seg.children.forEach(c=>{if(c.name==='legUpper'||c.name==='legLower')c.rotation.z+=Math.sin(time*0.006+i*0.5)*0.015;if(c.name==='foot')c.position.y=-0.16+Math.sin(time*0.006+i*0.5)*0.025;});}}
-  if(spiderMesh){spiderMesh.position.copy(g2v(spiderPos.x,spiderPos.y));spiderMesh.position.y=0.15+Math.sin(time*0.004)*0.05;spiderMesh.rotation.y+=0.01;for(const lm of spiderLegMeshes){const li=parseInt(lm.name.split('_')[1])||0,ph=li*0.8+time*0.004,wc=Math.sin(ph)*0.12;if(lm.name.startsWith('femur_'))lm.rotation.x+=wc*0.02;else if(lm.name.startsWith('tibia_'))lm.rotation.x+=wc*0.03;}}
+  if(spiderMesh){spiderMesh.position.copy(g2v(spiderPos.x,spiderPos.y));spiderMesh.position.y=0.15+Math.sin(time*0.004)*0.05;spiderMesh.rotation.y+=0.01;for(const lm of spiderLegMeshes){const li=parseInt(lm.name.split('_')[1])||0,ph=li*0.8+time*0.004,wc=Math.sin(ph)*0.12;if(lm.name.startsWith('femur_'))lm.rotation.x+=wc*0.02;else if(lm.name.startsWith('tibia_'))lm.rotation.x+=wc*0.03;}const dist=spiderMesh.position.distanceTo(snakeSegments[0].position);const danger=Math.max(0,1-dist/6);spiderMesh.traverse(c=>{if(c.isMesh&&c.material.emissiveIntensity!==undefined){c.material.emissiveIntensity=0.04+danger*0.25;c.material.emissive?.setHex(danger>0.3?0xff2244:0xdd4488);}});}
   if(!state.paused&&!state.gameOver&&snakeSegments.length>0&&state.trail!=='none'&&time%3<1.5)spawnTrail(snakeSegments[0].position);
   dustP.rotation.y+=0.0003;updateParticles(dt);
   if(!state.gameOver&&snakeSegments.length>0){const h=snakeSegments[0].position;const tc=new THREE.Vector3(h.x+8,13+Math.sin(time*0.002)*0.5,h.z+14);camera.position.lerp(tc,0.015);camera.lookAt(new THREE.Vector3(h.x,0.3,h.z));}
+  // Screen shake
+  if(screenShake>0){const sx=(Math.random()-0.5)*screenShake*0.04,sy=(Math.random()-0.5)*screenShake*0.04;camera.position.x+=sx;camera.position.y+=sy;screenShake*=0.88;if(screenShake<0.05)screenShake=0;}
   composer.render();
 }
 
