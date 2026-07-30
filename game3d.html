@@ -320,20 +320,21 @@ const furTex=makeFurTex();
 function makeGroundTex(bright=0){
   const c=document.createElement('canvas');c.width=128;c.height=128;
   const ctx=c.getContext('2d');const b=25+bright*30;
-  // Base grass
-  ctx.fillStyle=`rgb(${b-8},${b+8},${b-8})`;ctx.fillRect(0,0,128,128);
-  for(let i=0;i<1200;i++){
+  ctx.fillStyle=`rgb(${b-4},${b+12},${b-4})`;ctx.fillRect(0,0,128,128);
+  // Grass noise strokes
+  for(let i=0;i<2000;i++){
     const x=Math.random()*128,y=Math.random()*128;
-    ctx.strokeStyle=`rgba(${30+bright*40+Math.random()*40},${60+bright*50+Math.random()*50},${20+bright*30+Math.random()*30},0.15+Math.random()*0.35)`;
-    ctx.lineWidth=0.4+Math.random()*0.8;ctx.beginPath();ctx.moveTo(x,y);
-    ctx.lineTo(x+(Math.random()-0.5)*4,y-(2+Math.random()*7));ctx.stroke();
+    ctx.strokeStyle=`rgba(${20+bright*40+Math.random()*50},${50+bright*60+Math.random()*60},${10+bright*30+Math.random()*40},0.08+Math.random()*0.20)`;
+    ctx.lineWidth=0.3+Math.random()*0.6;ctx.beginPath();ctx.moveTo(x,y);
+    ctx.lineTo(x+(Math.random()-0.5)*3,y-(1+Math.random()*5));ctx.stroke();
   }
-  // Subtle checkerboard overlay
-  ctx.globalCompositeOperation='overlay';const cw=16;
-  for(let x=0;x<128;x+=cw)for(let y=0;y<128;y+=cw){const brightAdd=(x/cw%2===y/cw%2)?15:-8;ctx.fillStyle=`rgba(${brightAdd},${brightAdd},${brightAdd},0.12)`;ctx.fillRect(x,y,cw,cw);}
-  // Radial gradient vignette on ground
-  ctx.globalCompositeOperation='multiply';const grad=ctx.createRadialGradient(64,64,0,64,64,64);grad.addColorStop(0,'rgba(255,255,255,0)');grad.addColorStop(0.6,'rgba(255,255,255,0)');grad.addColorStop(1,'rgba(0,0,0,0.3)');ctx.fillStyle=grad;ctx.fillRect(0,0,128,128);
-  const t=new THREE.CanvasTexture(c);t.wrapS=t.wrapT=THREE.RepeatWrapping;t.repeat.set(12,12);t.anisotropy=4;return t;
+  // Soft checkerboard via semi-transparent quads (overlay can cause issues)
+  ctx.globalAlpha=0.06;
+  for(let x=0;x<128;x+=16)for(let y=0;y<128;y+=16){if((x/16)%2!==(y/16)%2){ctx.fillStyle='#fff';ctx.fillRect(x,y,16,16);}}
+  ctx.globalAlpha=0.08;
+  for(let x=0;x<128;x+=16)for(let y=0;y<128;y+=16){if((x/16)%2===(y/16)%2){ctx.fillStyle='#000';ctx.fillRect(x,y,16,16);}}
+  ctx.globalAlpha=1;
+  const t=new THREE.CanvasTexture(c);t.wrapS=t.wrapT=THREE.RepeatWrapping;t.repeat.set(8,8);t.anisotropy=4;return t;
 }
 
 // ─── Scenes ──────────────────────────────────────────
