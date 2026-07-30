@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <title>Ласка vs Паук — 3D</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🦊</text></svg>">
 <style>
 :root {
   --bg: #070b14;
@@ -48,6 +49,12 @@ canvas{display:block}
   display:flex;align-items:center;gap:5px;color:var(--fg);letter-spacing:0.01em}
 .hud-badge .coin{color:var(--gold)}
 .hud-badge .score{color:var(--accent)}
+#streakBadge.streak-hidden{opacity:0;transform:scale(0.8);pointer-events:none}
+#streakBadge{transition:all 0.3s var(--ease)}
+#speedBar{position:fixed;top:56px;left:50%;transform:translateX(-50%);z-index:10;pointer-events:none;width:min(160px,30vw);height:3px;background:rgba(255,255,255,0.06);border-radius:3px;overflow:hidden}
+#speedFill{height:100%;width:0%;background:linear-gradient(90deg,var(--green),var(--gold),var(--accent));border-radius:3px;transition:width 0.5s var(--ease)}
+#flash{position:fixed;inset:0;z-index:9;pointer-events:none;background:#fff;opacity:0;transition:opacity 0.1s ease-out}
+#flash.flash{opacity:0.25}
 @keyframes coinPop{0%{transform:scale(1)}40%{transform:scale(1.35)}100%{transform:scale(1)}}
 .coin-pop{animation:coinPop 0.35s var(--ease)}
 
@@ -59,11 +66,11 @@ canvas{display:block}
 .bonus-chip.show{opacity:1;transform:translateY(0)}
 .bonus-chip .timer{color:var(--gold);font-weight:700;font-variant-numeric:tabular-nums}
 
-#status{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:15;
+#status{position:fixed;top:30%;left:50%;transform:translate(-50%,-50%);z-index:15;
   pointer-events:none;color:#fff;font-size:26px;font-weight:800;text-align:center;
   text-shadow:0 4px 40px rgba(0,0,0,0.8),0 0 50px var(--accent-glow);
-  opacity:0;transition:opacity 0.35s var(--ease),transform 0.35s var(--ease);
-  transform:translate(-50%,-50%) scale(0.92)}
+  opacity:0;transition:opacity 0.4s cubic-bezier(0.34,1.56,0.64,1),transform 0.4s cubic-bezier(0.34,1.56,0.64,1);
+  transform:translate(-50%,-30%) scale(0.8)}
 #status.show{opacity:1;transform:translate(-50%,-50%) scale(1)}
 
 #combo{position:fixed;top:38%;left:50%;transform:translate(-50%,-50%);z-index:12;
@@ -123,7 +130,8 @@ canvas{display:block}
 @media(max-width:600px){
   #hud{padding:8px 10px}
   .hud-btn,.hud-badge{font-size:11px;padding:5px 9px}
-  .hud-btn span,.hud-badge span{display:none}
+  .hud-label{display:none}
+  #speedBar{width:min(100px,25vw);top:52px}
   #status{font-size:20px}
   #combo{font-size:34px}#combo small{font-size:14px}
   #overlay .card{padding:28px 22px}#overlay .card h2{font-size:26px}
@@ -138,18 +146,20 @@ canvas{display:block}
 
 <div id="hud">
   <div class="hud-group">
-    <button class="hud-btn" id="shopBtn"><span>🏪</span> Магазин</button>
+    <button class="hud-btn" id="shopBtn"><span>🏪</span><span class="hud-label">Магазин</span></button>
     <button class="hud-btn" id="restartBtn"><span title="Заново">🔄</span></button>
   </div>
   <div class="hud-group">
+    <div id="streakBadge" class="hud-badge streak-hidden"><span>🔥</span><span id="streakDisplay">0</span></div>
     <div class="hud-badge"><span class="coin">🪙</span> <span id="coinsDisplay">0</span></div>
     <div class="hud-badge"><span class="score">🐜</span> <span id="scoreDisplay">0</span></div>
   </div>
 </div>
-
+<div id="speedBar"><div id="speedFill"></div></div>
 <div id="bonusBar"></div>
 <div id="status"></div>
 <div id="combo">+10</div>
+<div id="flash"></div>
 <div id="vignette"></div>
 
 <div id="overlay">
@@ -232,10 +242,12 @@ function playSfx(name){
 // ─── DOM ─────────────────────────────────────────────
 const $=id=>document.getElementById(id);
 const scoreEl=$('scoreDisplay'),coinsEl=$('coinsDisplay'),shopCoinsEl=$('shopCoins');
-function popCoin(){coinsEl.classList.remove('coin-pop');void coinsEl.offsetWidth;coinsEl.classList.add('coin-pop');}
 const overlay=$('overlay'),overlayTitle=$('overlayTitle'),overlaySub=$('overlaySub'),overlayScore=$('overlayScore');
 const statusEl=$('status'),comboEl=$('combo'),shopEl=$('shop'),shopItemsEl=$('shopItems'),shopCatsEl=$('shopCats');
 const shopBtn=$('shopBtn'),shopClose=$('shopClose'),bonusBar=$('bonusBar');
+const streakEl=$('streakDisplay'),streakBadge=$('streakBadge'),speedFill=$('speedFill'),flashEl=$('flash');
+function popCoin(){coinsEl.classList.remove('coin-pop');void coinsEl.offsetWidth;coinsEl.classList.add('coin-pop');}
+function showFlash(){flashEl.classList.remove('flash');void flashEl.offsetWidth;flashEl.classList.add('flash');setTimeout(()=>flashEl.classList.remove('flash'),100);}
 
 // ─── Three.js ────────────────────────────────────────
 const scene=new THREE.Scene();
@@ -392,7 +404,7 @@ const topLight=new THREE.DirectionalLight(0x6688ff,0.2);
 topLight.position.set(0,20,0);scene.add(topLight);
 
 // ─── Environment ─────────────────────────────────────
-let envObjects=[];let groundTexCache={};let screenShake=0;
+let envObjects=[];let groundTiles=[];let groundTexCache={};let screenShake=0;
 function shake(n){screenShake=Math.max(screenShake||0,n);}
 function initEnvironment(sid){
   for(const o of envObjects){scene.remove(o);if(o.geometry)o.geometry.dispose();if(o.material)o.material.dispose();}
@@ -419,7 +431,7 @@ function initEnvironment(sid){
   gg.rotation.x=-Math.PI/2;gg.position.set(COLS/2,-0.05,ROWS/2);gg.receiveShadow=true;scene.add(gg);envObjects.push(gg);
   // Tiles
   const tm=new THREE.MeshStandardMaterial({color:cfg.ground[1],roughness:0.85,metalness:0.05,transparent:true,opacity:0.2});
-  for(let x=0;x<COLS;x+=2)for(let y=0;y<ROWS;y+=2){const t=new THREE.Mesh(new THREE.PlaneGeometry(0.9,0.9),tm);t.rotation.x=-Math.PI/2;t.position.set(x+0.5,-0.02,y+0.5);scene.add(t);envObjects.push(t);}
+  groundTiles=[];for(let x=0;x<COLS;x+=2)for(let y=0;y<ROWS;y+=2){const t=new THREE.Mesh(new THREE.PlaneGeometry(0.9,0.9),tm);t.rotation.x=-Math.PI/2;t.position.set(x+0.5,-0.02,y+0.5);t.userData={gx:x+0.5,gz:y+0.5};scene.add(t);envObjects.push(t);groundTiles.push(t);}
   // Grid
   const em=new THREE.LineBasicMaterial({color:cfg.edge,transparent:true,opacity:0.1});
   for(let i=0;i<=COLS;i++){
@@ -582,6 +594,10 @@ function rebuildConnectors(){
 }
 function createSpider(){if(spiderMesh){scene.remove(spiderMesh);}spiderLegMeshes=[];spiderMesh=createCuteSpider(0.65);spiderPos=randGridPos();spiderMesh.position.copy(g2v(spiderPos.x,spiderPos.y));spiderMesh.position.y=0.15;scene.add(spiderMesh);}
 function randGridPos(){let p,a=0;do{p={x:Math.floor(Math.random()*COLS),y:Math.floor(Math.random()*ROWS)};a++;}while(a<100&&state.snakeGrid.some(s=>s.x===p.x&&s.y===p.y));return p;}
+function spawnConfetti(){
+  const cs=[0xe94560,0xff6b35,0xffd700,0x44ff88,0x66ccff,0xff44aa,0x44ffdd,0xff8844];
+  for(let i=0;i<40;i++){const col=cs[Math.floor(Math.random()*cs.length)];const sz=0.02+Math.random()*0.04;const m=new THREE.Mesh(new THREE.BoxGeometry(sz,sz*0.2,sz*0.5),new THREE.MeshStandardMaterial({color:col,emissive:col,emissiveIntensity:0.5,roughness:0.5,metalness:0.1}));const pos=g2v(COLS/2,ROWS/2);m.position.copy(pos);m.position.y=0.5+Math.random()*0.5;const a=Math.random()*Math.PI*2;particles.push({mesh:m,vel:new THREE.Vector3(Math.cos(a)*(0.05+Math.random()*0.12),0.08+Math.random()*0.08,Math.sin(a)*(0.05+Math.random()*0.12)),life:1.2+Math.random()*0.5,spin:(Math.random()-0.5)*0.2});scene.add(m);}
+}
 function spawnParticles(pos,c=25,star=false){
   const cs=[0xe94560,0xff6b35,0xffd700,0x44ff88,0x66ccff,0xff44aa];
   for(let i=0;i<c;i++){
@@ -617,13 +633,14 @@ function moveSnake(){
     let coinsEarned=COINS_PER_SPIDER;
     let bonusNote='';
     if(state.streak%STREAK_BONUS_EVERY===0){coinsEarned+=STREAK_BONUS_COINS;bonusNote=` 🔥+${STREAK_BONUS_COINS}`;}
-    if(state.score%MILESTONE_EVERY===0){coinsEarned+=MILESTONE_BONUS;bonusNote+=` 🏆+${MILESTONE_BONUS}`;}
+    if(state.score%MILESTONE_EVERY===0){coinsEarned+=MILESTONE_BONUS;bonusNote+=` 🏆+${MILESTONE_BONUS}`;spawnConfetti();playSfx('bonus');}
     state.coins+=coinsEarned;
-    scoreEl.textContent=state.score;coinsEl.textContent=state.coins;popCoin();
+    scoreEl.textContent=state.score;coinsEl.textContent=state.coins;popCoin();showFlash();
     playSfx('eat');comboEl.innerHTML=`+${pts}<small>🪙 +${coinsEarned}${bonusNote}</small>`;comboEl.classList.add('pop');
+    streakEl.textContent=state.streak;streakBadge.classList.toggle('streak-hidden',state.streak<2);
     clearTimeout(comboTimeout);comboTimeout=setTimeout(()=>comboEl.classList.remove('pop'),700);
     spawnParticles(g2v(spiderPos.x,spiderPos.y),35,true);shake(4);
-    if(state.score%50===0&&state.moveInterval>MIN_INTERVAL){state.moveInterval=Math.max(MIN_INTERVAL,state.moveInterval-12);showStatus('⏩ Speed Up!');}
+    if(state.score%50===0&&state.moveInterval>MIN_INTERVAL){state.moveInterval=Math.max(MIN_INTERVAL,state.moveInterval-12);showStatus('⏩ Speed Up!');}updateSpeedBar();
     createSpider();save();
   }
   if(!ate)state.snakeGrid.pop();
@@ -661,9 +678,10 @@ function restart(){
   if(hatMesh){scene.remove(hatMesh);hatMesh=null;}
   bodyConnectors.length=0;snakeSegments.length=0;
   if(spiderMesh){scene.remove(spiderMesh);spiderMesh=null;}
-  createWeasel();createSpider();updateBonusBar();showStatus('🔄 Новая игра!');
+  createWeasel();createSpider();updateBonusBar();updateSpeedBar();showStatus('🔄 Новая игра!');
 }
 function showStatus(msg){statusEl.textContent=msg;statusEl.classList.add('show');clearTimeout(statusEl._timeout);statusEl._timeout=setTimeout(()=>statusEl.classList.remove('show'),1500);}
+function updateSpeedBar(){const p=1-(state.moveInterval-MIN_INTERVAL)/(BASE_INTERVAL-MIN_INTERVAL);speedFill.style.width=Math.min(100,Math.round(p*100))+'%';}
 
 function updateBonusBar(){
   bonusBar.innerHTML='';const ab=state.activeBonuses;
@@ -792,6 +810,8 @@ function animate(time){
   if(jawMesh)jawMesh.position.y=-0.24+Math.sin(time*0.003)*0.015;
   for(let i=0;i<earMeshes.length;i++){const s=i===0?1:-1;earMeshes[i].rotation.z=s*0.3+Math.sin(time*0.005+i)*0.03;earMeshes[i].rotation.x=-0.2+Math.sin(time*0.004+i*1.5)*0.02;}
   if(pupilMeshes.length>=2){const lx=Math.sin(time*0.002)*0.02,ly=Math.sin(time*0.0015)*0.01;pupilMeshes[0].position.x=-0.24+lx;pupilMeshes[1].position.x=0.24+lx;pupilMeshes[0].position.y=0.10+ly;pupilMeshes[1].position.y=0.10+ly;}
+  // Idle head sway
+  if(snakeSegments.length>0&&!state.gameOver){const sway=Math.sin(time*0.0015)*0.02;snakeSegments[0].position.x+=sway;snakeSegments[0].rotation.z=Math.sin(time*0.002)*0.02;}
   // Blink (squash eyes)
   if(!state._blinkTimer)state._blinkTimer=2000+Math.random()*3000;
   state._blinkTimer-=dt;
@@ -799,10 +819,12 @@ function animate(time){
   if(tailTuft){tailTuft.material.emissiveIntensity=0.2+Math.sin(time*0.005)*0.25;}
   const tail=snakeSegments[snakeSegments.length-1];if(tail&&tail.name==='tail')tail.rotation.y=Math.sin(time*0.003)*0.15;
   for(let i=1;i<snakeSegments.length-1;i++){const seg=snakeSegments[i];if(seg.type==='Mesh'){seg.children.forEach(c=>{if(c.name==='legUpper'||c.name==='legLower')c.rotation.z+=Math.sin(time*0.006+i*0.5)*0.015;if(c.name==='foot')c.position.y=-0.16+Math.sin(time*0.006+i*0.5)*0.025;});}}
-  if(spiderMesh){spiderMesh.position.copy(g2v(spiderPos.x,spiderPos.y));spiderMesh.position.y=0.15+Math.sin(time*0.004)*0.05;spiderMesh.rotation.y+=0.01;for(const lm of spiderLegMeshes){const li=parseInt(lm.name.split('_')[1])||0,ph=li*0.8+time*0.004,wc=Math.sin(ph)*0.12;if(lm.name.startsWith('femur_'))lm.rotation.x+=wc*0.02;else if(lm.name.startsWith('tibia_'))lm.rotation.x+=wc*0.03;}const dist=spiderMesh.position.distanceTo(snakeSegments[0].position);const danger=Math.max(0,1-dist/6);spiderMesh.traverse(c=>{if(c.isMesh&&c.material.emissiveIntensity!==undefined){c.material.emissiveIntensity=0.04+danger*0.25;c.material.emissive?.setHex(danger>0.3?0xff2244:0xdd4488);}});}
+  if(spiderMesh){spiderMesh.position.copy(g2v(spiderPos.x,spiderPos.y));spiderMesh.position.y=0.15+Math.sin(time*0.004)*0.05;spiderMesh.rotation.y+=0.01;const dist=spiderMesh.position.distanceTo(snakeSegments.length>0?snakeSegments[0].position:spiderMesh.position);const danger=Math.max(0,1-dist/5);const legSpd=0.004+danger*0.012;for(const lm of spiderLegMeshes){const li=parseInt(lm.name.split('_')[1])||0,ph=li*0.8+time*legSpd,wc=Math.sin(ph)*0.12;if(lm.name.startsWith('femur_'))lm.rotation.x+=wc*0.02;else if(lm.name.startsWith('tibia_'))lm.rotation.x+=wc*0.03;}spiderMesh.traverse(c=>{if(c.isMesh&&c.material.emissiveIntensity!==undefined){c.material.emissiveIntensity=0.04+danger*0.3;c.material.emissive?.setHex(danger>0.4?0xff2244:0xdd4488);if(danger>0.5)c.material.emissiveIntensity=0.04+Math.sin(time*0.01)*0.3;}});}
   if(!state.paused&&!state.gameOver&&snakeSegments.length>0&&state.trail!=='none'&&time%3<1.5)spawnTrail(snakeSegments[0].position);
-  dustP.rotation.y+=0.0003;updateParticles(dt);
-  if(!state.gameOver&&snakeSegments.length>0){const h=snakeSegments[0].position;const tc=new THREE.Vector3(h.x+8,13+Math.sin(time*0.002)*0.5,h.z+14);camera.position.lerp(tc,0.015);camera.lookAt(new THREE.Vector3(h.x,0.3,h.z));}
+  dustP.rotation.y+=0.0003;dustMat.opacity=0.12+Math.sin(time*0.0008)*0.08;updateParticles(dt);
+  if(!state.gameOver&&snakeSegments.length>0){const h=snakeSegments[0].position;const len=Math.min(snakeSegments.length,20);const zoom=Math.max(7,13-len*0.15);const tc=new THREE.Vector3(h.x+(8-len*0.08),zoom+Math.sin(time*0.002)*0.3,h.z+(14-len*0.1));camera.position.lerp(tc,0.02);camera.lookAt(new THREE.Vector3(h.x,0.3,h.z));}
+  // Ground tile pulse near weasel
+  if(snakeSegments.length>0){const hp=snakeSegments[0].position;for(const t of groundTiles){const d=hp.distanceTo(new THREE.Vector3(t.userData.gx,0,t.userData.gz));const g=d<3?0.2+Math.sin(time*0.003+d*2)*0.3*Math.max(0,1-d/3):0;t.material.opacity=g;}}
   // Screen shake
   if(screenShake>0){const sx=(Math.random()-0.5)*screenShake*0.04,sy=(Math.random()-0.5)*screenShake*0.04;camera.position.x+=sx;camera.position.y+=sy;screenShake*=0.88;if(screenShake<0.05)screenShake=0;}
   composer.render();
@@ -810,7 +832,7 @@ function animate(time){
 
 // ─── Init ────────────────────────────────────────────
 initEnvironment(state.scene);createWeasel();createSpider();
-coinsEl.textContent=state.coins;scoreEl.textContent=state.score;
+coinsEl.textContent=state.coins;scoreEl.textContent=state.score;updateSpeedBar();
 animFrame=requestAnimationFrame(animate);
 
 overlay.classList.add('show');
